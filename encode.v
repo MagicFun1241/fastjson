@@ -1,5 +1,13 @@
 module fastjson
 
+// f64_to_str converts a float64 to its shortest decimal representation using Schubfach algorithm.
+// Writes "null" for inf/nan.
+pub fn f64_to_str(val f64) string {
+	mut buf := [u8(0)].repeat(64)
+	n := C.fast_f64_to_buf(buf.data, 0, val)
+	return unsafe { tos(buf.data, n) }
+}
+
 // encode serializes a value of type T to a JSON string using direct buffer building.
 pub fn encode[T](val T) string {
 	$if T.unaliased_typ is string {
@@ -23,9 +31,9 @@ pub fn encode[T](val T) string {
 	} $else $if T.unaliased_typ is u8 {
 		return u8(val).str()
 	} $else $if T.unaliased_typ is f64 {
-		return f64(val).str()
+		return f64_to_str(f64(val))
 	} $else $if T.unaliased_typ is f32 {
-		return f32(val).str()
+		return f64_to_str(f64(val))
 	} $else $if T.unaliased_typ is $struct {
 		return encode_struct(val)
 	} $else {
@@ -169,14 +177,10 @@ fn encode_struct[T](val T) string {
 			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is f64 {
 			v := val.$(field.name)
-			s := v.str()
-			unsafe { C.memcpy(buf + p, s.str, s.len) }
-			p += s.len
+			p += unsafe { C.fast_f64_to_buf(buf, p, v) }
 		} $else $if field.unaliased_typ is f32 {
 			v := val.$(field.name)
-			s := f64(v).str()
-			unsafe { C.memcpy(buf + p, s.str, s.len) }
-			p += s.len
+			p += unsafe { C.fast_f64_to_buf(buf, p, f64(v)) }
 		} $else $if field.unaliased_typ is []string {
 			arr := val.$(field.name)
 			unsafe { buf[p] = `[` }

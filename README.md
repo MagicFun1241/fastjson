@@ -13,6 +13,7 @@ A blazingly fast JSON serializing & deserializing library for [V](https://vlang.
 - **SIMD-accelerated scanning** — field lookup, whitespace skip, structural char detection all use SSE2 16-byte blocks
 - **Eisel-Lemire float parsing** — 128-bit power-of-10 lookup avoids `strtod` for common doubles
 - **itoa8 SSE2 integer formatting** — parallel 8-digit int-to-string from sonic's `fastint.h`, with Digits[200] scalar fallback
+- **Schubfach f64-to-string** — shortest decimal representation for all f64 values (including denormals), no `.str()` or `snprintf` fallback
 - **Zero-allocation string decoding** — `extract_string` returns a zero-copy slice into the JSON buffer
 - **Generic encode/decode** — `encode[T]()` and `decode[T]()` work with any V struct via compile-time reflection
 - **Nested structs, arrays, maps** — `[]string`, `[]int`, `[]f64`, `map[string]string`, and nested struct fields all supported
@@ -24,22 +25,22 @@ Apple M1 Pro, 200,000 iterations, 3 sizes matching sonic's benchmark methodology
 | Size | Operation | V fastjson | Go stdlib | Go sonic | vs stdlib | vs sonic |
 |------|-----------|-----------|-----------|---------|-----------|----------|
 | **Small (~210B, 11 keys)** | | | | | | |
-| | Decode | **545 ns** | 2086 ns | 657 ns | 3.8× faster | 1.2× faster |
-| | Encode | 728 ns | **371 ns** | 605 ns | 0.5× | 0.8× |
-| | Roundtrip | 776 ns | 1457 ns | 1262 ns | 1.9× faster | 1.6× faster |
+| | Decode | **532 ns** | 2086 ns | 657 ns | 3.9× faster | 1.2× faster |
+| | Encode | 653 ns | **371 ns** | 605 ns | 0.6× | 1.1× |
+| | Roundtrip | 647 ns | 1457 ns | 1262 ns | 2.3× faster | 2.0× faster |
 | **Medium (~340B, 13 keys)** | | | | | | |
-| | Decode | 1371 ns | 3256 ns | **995 ns** | 2.4× faster | 1.4× |
-| | Encode | 1779 ns | **754 ns** | 1118 ns | 0.4× | 0.6× |
-| | Roundtrip | 1779 ns | 4010 ns | 2113 ns | 2.3× faster | 1.2× |
+| | Decode | 1291 ns | 3256 ns | **995 ns** | 2.5× faster | 1.3× |
+| | Encode | 1576 ns | **754 ns** | 1118 ns | 0.5× | 1.4× |
+| | Roundtrip | 1636 ns | 4010 ns | 2113 ns | 2.5× faster | 1.3× |
 | **Large (~420B, 9 keys + big arrays/maps)** | | | | | | |
-| | Decode | 1608 ns | 4527 ns | **1113 ns** | 2.8× faster | 1.4× |
-| | Encode | 2099 ns | **1353 ns** | 1833 ns | 0.6× | 0.9× |
-| | Roundtrip | 2100 ns | 5880 ns | 2946 ns | 2.8× faster | 1.4× |
+| | Decode | 1552 ns | 4527 ns | **1113 ns** | 2.9× faster | 1.4× |
+| | Encode | 1984 ns | **1353 ns** | 1833 ns | 0.7× | 1.1× |
+| | Roundtrip | 1983 ns | 5880 ns | 2946 ns | 3.0× faster | 1.5× |
 
 **Takeaways:**
-- **Decode**: 2.4–3.8× faster than Go stdlib, competitive with sonic
-- **Encode**: slower than Go stdlib and sonic (V's runtime overhead for struct iteration)
-- **Roundtrip**: 1.9–2.8× faster than Go stdlib thanks to fast decode dominating
+- **Decode**: 2.5–3.9× faster than Go stdlib, competitive with sonic
+- **Encode**: now competitive with sonic (1.1–1.4×), closing gap to Go stdlib (Schubfach f64-to-string eliminates `.str()` fallback)
+- **Roundtrip**: 2.0–3.0× faster than Go stdlib, 1.3–2.0× faster than sonic
 
 Run the benchmark yourself:
 

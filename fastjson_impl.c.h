@@ -3,9 +3,11 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "fj_atof.h"
 #include "fj_itoa.h"
+#include "fj_dtoa.h"
 
 /* ============================================================
  * SSE2 SIMD primitives
@@ -288,6 +290,19 @@ static inline int skip_json_value(const uint8_t* buf, int len, int pos) {
     else if (ch == 'f') { return (pos + 5 <= len) ? pos + 5 : len; }
     else if (ch == 'n') { return (pos + 4 <= len) ? pos + 4 : len; }
     return pos + 1;
+}
+
+/* Fast float-to-string using Schubfach algorithm.
+ * Writes directly into the output buffer. Returns number of characters written.
+ * Returns -1 only for inf/nan (writes "null" for JSON). */
+static inline int fast_f64_to_buf(uint8_t* buf, int start, double val) {
+    int n = fj_f64toa((char*)(buf + start), val);
+    if (n <= 0) {
+        /* inf or nan — write "null" for JSON */
+        memcpy(buf + start, "null", 4);
+        return 4;
+    }
+    return n;
 }
 
 #endif /* FASTJSON_IMPL_H */
