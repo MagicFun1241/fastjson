@@ -13,4 +13,10 @@ fn C.skip_json_value(buf &u8, len int, pos int) int
 fn C.fast_int_to_buf(buf &u8, start int, val i64) int
 fn C.fast_uint64_to_buf(buf &u8, start int, val u64) int
 fn C.fast_f64_to_buf(buf &u8, start int, val f64) int
+fn C.fj_write_obj_key(buf &u8, p int, first int, key &u8, key_len int) int
+fn C.fj_write_string(buf &u8, p int, s &u8, s_len int) int
+fn C.fj_write_bool(buf &u8, p int, val int) int
+fn C.fj_write_null(buf &u8, p int) int
+fn C.fj_write_string_array(buf &u8, p int, strs &&u8, lens &int, count int) int
+fn C.fj_write_string_map(buf &u8, p int, keys &&u8, key_lens &int, vals &&u8, val_lens &int, count int) int
 fn C.simd_memcmp(s1 &u8, s2 &u8, n int) int

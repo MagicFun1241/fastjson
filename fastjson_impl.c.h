@@ -305,4 +305,76 @@ static inline int fast_f64_to_buf(uint8_t* buf, int start, double val) {
     return n;
 }
 
+/* Write JSON object key:  ,"key":
+ * Returns number of bytes written. */
+static inline int fj_write_obj_key(uint8_t* buf, int p, int first,
+                                    const char* key, int key_len) {
+    if (!first) { buf[p] = ','; p++; }
+    buf[p] = '"'; p++;
+    memcpy(buf + p, key, key_len); p += key_len;
+    buf[p] = '"'; p++;
+    buf[p] = ':'; p++;
+    return p;
+}
+
+/* Write JSON string value:  "str"
+ * Returns new position p. */
+static inline int fj_write_string(uint8_t* buf, int p, const char* s, int s_len) {
+    buf[p] = '"'; p++;
+    memcpy(buf + p, s, s_len); p += s_len;
+    buf[p] = '"'; p++;
+    return p;
+}
+
+/* Write JSON bool:  true / false
+ * Returns new position p. */
+static inline int fj_write_bool(uint8_t* buf, int p, int val) {
+    if (val) {
+        memcpy(buf + p, "true", 4); p += 4;
+    } else {
+        memcpy(buf + p, "false", 5); p += 5;
+    }
+    return p;
+}
+
+/* Write JSON null
+ * Returns new position p. */
+static inline int fj_write_null(uint8_t* buf, int p) {
+    memcpy(buf + p, "null", 4); p += 4;
+    return p;
+}
+
+/* Write JSON array of strings:  ["a","b"]
+ * Returns new position p. */
+static inline int fj_write_string_array(uint8_t* buf, int p,
+                                          const char** strs, const int* lens, int count) {
+    buf[p] = '['; p++;
+    for (int i = 0; i < count; i++) {
+        if (i > 0) { buf[p] = ','; p++; }
+        buf[p] = '"'; p++;
+        memcpy(buf + p, strs[i], lens[i]); p += lens[i];
+        buf[p] = '"'; p++;
+    }
+    buf[p] = ']'; p++;
+    return p;
+}
+
+/* Write JSON map of strings:  {"k":"v","k2":"v2"}
+ * Returns new position p. */
+static inline int fj_write_string_map(uint8_t* buf, int p,
+                                        const char** keys, const int* key_lens,
+                                        const char** vals, const int* val_lens, int count) {
+    buf[p] = '{'; p++;
+    for (int i = 0; i < count; i++) {
+        if (i > 0) { buf[p] = ','; p++; }
+        buf[p] = '"'; p++;
+        memcpy(buf + p, keys[i], key_lens[i]); p += key_lens[i];
+        memcpy(buf + p, "\":\"", 3); p += 3;
+        memcpy(buf + p, vals[i], val_lens[i]); p += val_lens[i];
+        buf[p] = '"'; p++;
+    }
+    buf[p] = '}'; p++;
+    return p;
+}
+
 #endif /* FASTJSON_IMPL_H */
