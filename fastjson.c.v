@@ -10,3 +10,6 @@ fn C.fast_parse_int(buf &u8, len int, consumed &int) i64
 fn C.fast_parse_f64(buf &u8, len int, consumed &int) f64
 fn C.scan_json_string(buf &u8, len int, start int, content_start &int, content_len &int) int
 fn C.skip_json_value(buf &u8, len int, pos int) int
+fn C.fast_int_to_buf(buf &u8, start int, val i64) int
+fn C.fast_uint64_to_buf(buf &u8, start int, val u64) int
+fn C.simd_memcmp(s1 &u8, s2 &u8, n int) int

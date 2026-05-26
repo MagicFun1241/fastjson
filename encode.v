@@ -142,31 +142,31 @@ fn encode_struct[T](val T) string {
 			}
 		} $else $if field.unaliased_typ is int {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, v)
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is i64 {
 			v := val.$(field.name)
-			p += i64_to_buf(buf, p, v)
+			p += unsafe { C.fast_int_to_buf(buf, p, v) }
 		} $else $if field.unaliased_typ is i32 {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, int(v))
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is i16 {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, int(v))
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is i8 {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, int(v))
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is u64 {
 			v := val.$(field.name)
-			p += u64_to_buf(buf, p, v)
+			p += unsafe { C.fast_uint64_to_buf(buf, p, v) }
 		} $else $if field.unaliased_typ is u32 {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, int(v))
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is u16 {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, int(v))
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is u8 {
 			v := val.$(field.name)
-			p += int_to_buf(buf, p, int(v))
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
 		} $else $if field.unaliased_typ is f64 {
 			v := val.$(field.name)
 			s := v.str()
@@ -236,85 +236,4 @@ fn encode_struct[T](val T) string {
 	unsafe { buf[p] = `}` }
 	p++
 	return unsafe { tos(buf, p) }
-}
-
-fn int_to_buf(buf &u8, start int, val int) int {
-	if val == 0 {
-		unsafe { buf[start] = `0` }
-		return 1
-	}
-	mut neg := false
-	mut v := val
-	if v < 0 {
-		neg = true
-		v = -v
-	}
-	mut tmp := [20]u8{}
-	mut pos := 0
-	for v > 0 {
-		tmp[pos] = u8(v % 10) + `0`
-		v = v / 10
-		pos++
-	}
-	mut p := start
-	if neg {
-		unsafe { buf[p] = `-` }
-		p++
-	}
-	for j := 0; j < pos; j++ {
-		unsafe { buf[p] = tmp[pos - 1 - j] }
-		p++
-	}
-	return p - start
-}
-
-fn i64_to_buf(buf &u8, start int, val i64) int {
-	if val == 0 {
-		unsafe { buf[start] = `0` }
-		return 1
-	}
-	mut neg := false
-	mut v := val
-	if v < 0 {
-		neg = true
-		v = -v
-	}
-	mut tmp := [20]u8{}
-	mut pos := 0
-	for v > 0 {
-		tmp[pos] = u8(v % 10) + `0`
-		v = v / 10
-		pos++
-	}
-	mut p := start
-	if neg {
-		unsafe { buf[p] = `-` }
-		p++
-	}
-	for j := 0; j < pos; j++ {
-		unsafe { buf[p] = tmp[pos - 1 - j] }
-		p++
-	}
-	return p - start
-}
-
-fn u64_to_buf(buf &u8, start int, val u64) int {
-	if val == 0 {
-		unsafe { buf[start] = `0` }
-		return 1
-	}
-	mut tmp := [20]u8{}
-	mut pos := 0
-	mut v := val
-	for v > 0 {
-		tmp[pos] = u8(v % 10) + `0`
-		v = v / 10
-		pos++
-	}
-	mut p := start
-	for j := 0; j < pos; j++ {
-		unsafe { buf[p] = tmp[pos - 1 - j] }
-		p++
-	}
-	return p - start
 }

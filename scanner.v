@@ -139,7 +139,7 @@ pub fn scan_object(json string) []FieldPos {
 pub fn find_field(json string, fields []FieldPos, key string) int {
 	for i, f in fields {
 		if f.key_len == key.len {
-			if unsafe { C.memcmp(json.str + f.key_start, key.str, key.len) == 0 } {
+			if unsafe { C.simd_memcmp(json.str + f.key_start, key.str, key.len) == 0 } {
 				return i
 			}
 		}

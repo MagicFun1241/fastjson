@@ -1,10 +1,103 @@
-#ifndef FASTJSON_SIMD_H
-#define FASTJSON_SIMD_H
+#ifndef FASTJSON_IMPL_H
+#define FASTJSON_IMPL_H
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* ============================================================
+ * Digits[200] lookup table — O(1) 2-digit int-to-string
+ * From sonic native/tab.h: writes "00".."99" in one lookup
+ * ============================================================ */
+static const char fj_digits[200] = {
+    '0','0','0','1','0','2','0','3','0','4','0','5','0','6','0','7','0','8','0','9',
+    '1','0','1','1','1','2','1','3','1','4','1','5','1','6','1','7','1','8','1','9',
+    '2','0','2','1','2','2','2','3','2','4','2','5','2','6','2','7','2','8','2','9',
+    '3','0','3','1','3','2','3','3','3','4','3','5','3','6','3','7','3','8','3','9',
+    '4','0','4','1','4','2','4','3','4','4','4','5','4','6','4','7','4','8','4','9',
+    '5','0','5','1','5','2','5','3','5','4','5','5','5','6','5','7','5','8','5','9',
+    '6','0','6','1','6','2','6','3','6','4','6','5','6','6','6','7','6','8','6','9',
+    '7','0','7','1','7','2','7','3','7','4','7','5','7','6','7','7','7','8','7','9',
+    '8','0','8','1','8','2','8','3','8','4','8','5','8','6','8','7','8','8','8','9',
+    '9','0','9','1','9','2','9','3','9','4','9','5','9','6','9','7','9','8','9','9',
+};
+
+/* ============================================================
+ * Fast int-to-string using Digits[200] lookup
+ * Writes digits in pairs using the lookup table, then reverses.
+ * Returns number of bytes written.
+ * ============================================================ */
+static inline int fast_int_to_buf(uint8_t* buf, int start, int64_t val) {
+    if (val == 0) { buf[start] = '0'; return 1; }
+
+    uint64_t uval;
+    int neg = 0;
+    if (val < 0) {
+        neg = 1;
+        uval = (uint64_t)(-(val + 1)) + 1;
+    } else {
+        uval = (uint64_t)val;
+    }
+
+    char tmp[20];
+    int pos = 0;
+    while (uval >= 100) {
+        const int idx = (int)(uval % 100) * 2;
+        tmp[pos] = fj_digits[idx + 1];
+        tmp[pos + 1] = fj_digits[idx];
+        uval /= 100;
+        pos += 2;
+    }
+    if (uval >= 10) {
+        const int idx = (int)uval * 2;
+        tmp[pos] = fj_digits[idx + 1];
+        tmp[pos + 1] = fj_digits[idx];
+        pos += 2;
+    } else {
+        tmp[pos] = '0' + (char)uval;
+        pos++;
+    }
+
+    int p = start;
+    if (neg) { buf[p++] = '-'; }
+    for (int j = pos - 1; j >= 0; j--) {
+        buf[p++] = tmp[j];
+    }
+    return p - start;
+}
+
+static inline int fast_uint64_to_buf(uint8_t* buf, int start, uint64_t val) {
+    if (val == 0) { buf[start] = '0'; return 1; }
+
+    char tmp[20];
+    int pos = 0;
+    while (val >= 100) {
+        const int idx = (int)(val % 100) * 2;
+        tmp[pos] = fj_digits[idx + 1];
+        tmp[pos + 1] = fj_digits[idx];
+        val /= 100;
+        pos += 2;
+    }
+    if (val >= 10) {
+        const int idx = (int)val * 2;
+        tmp[pos] = fj_digits[idx + 1];
+        tmp[pos + 1] = fj_digits[idx];
+        pos += 2;
+    } else {
+        tmp[pos] = '0' + (char)val;
+        pos++;
+    }
+
+    int p = start;
+    for (int j = pos - 1; j >= 0; j--) {
+        buf[p++] = tmp[j];
+    }
+    return p - start;
+}
+
+/* ============================================================
+ * SSE2 SIMD primitives
+ * ============================================================ */
 #ifdef __SSE2__
 #include <emmintrin.h>
 
@@ -13,8 +106,7 @@ static inline int simd_find_char(const uint8_t* buf, int len, uint8_t c) {
     const __m128i vc = _mm_set1_epi8((char)c);
     for (; i + 16 <= len; i += 16) {
         __m128i chunk = _mm_loadu_si128((const __m128i*)(buf + i));
-        __m128i eq = _mm_cmpeq_epi8(chunk, vc);
-        int mask = _mm_movemask_epi8(eq);
+        int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, vc));
         if (mask) return i + __builtin_ctz(mask);
     }
     for (; i < len; i++) {
@@ -30,15 +122,13 @@ static inline void simd_find_two(const uint8_t* buf, int len, uint8_t c1, uint8_
     const __m128i vc2 = _mm_set1_epi8((char)c2);
     for (; i + 16 <= len; i += 16) {
         __m128i chunk = _mm_loadu_si128((const __m128i*)(buf + i));
-        __m128i eq1 = _mm_cmpeq_epi8(chunk, vc1);
-        __m128i eq2 = _mm_cmpeq_epi8(chunk, vc2);
-        int m1 = _mm_movemask_epi8(eq1);
-        int m2 = _mm_movemask_epi8(eq2);
+        int m1 = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, vc1));
+        int m2 = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, vc2));
         int combined = m1 | m2;
         if (combined) {
-            int pos = i + __builtin_ctz(combined);
-            *out_pos = pos;
-            *out_is_c2 = (m2 >> __builtin_ctz(combined)) & 1;
+            int bit = __builtin_ctz(combined);
+            *out_pos = i + bit;
+            *out_is_c2 = (m2 >> bit) & 1;
             return;
         }
     }
@@ -61,8 +151,9 @@ static inline int simd_skip_ws(const uint8_t* buf, int len, int start) {
     const __m128i vlf = _mm_set1_epi8('\n');
     for (; i + 16 <= len; i += 16) {
         __m128i chunk = _mm_loadu_si128((const __m128i*)(buf + i));
-        __m128i eq = _mm_or_si128(_mm_or_si128(_mm_cmpeq_epi8(chunk, vsp), _mm_cmpeq_epi8(chunk, vtab)),
-                                   _mm_or_si128(_mm_cmpeq_epi8(chunk, vcr), _mm_cmpeq_epi8(chunk, vlf)));
+        __m128i eq = _mm_or_si128(
+            _mm_or_si128(_mm_cmpeq_epi8(chunk, vsp), _mm_cmpeq_epi8(chunk, vtab)),
+            _mm_or_si128(_mm_cmpeq_epi8(chunk, vcr), _mm_cmpeq_epi8(chunk, vlf)));
         int mask = _mm_movemask_epi8(eq);
         if (mask != 0xffff) {
             return i + __builtin_ctz(~mask);
@@ -74,8 +165,46 @@ static inline int simd_skip_ws(const uint8_t* buf, int len, int start) {
     return len;
 }
 
+/* Find first structural character (}, ], ,) — used for fast number skip.
+ * Returns offset from buf, or len if not found. */
+static inline int simd_structural_mask(const uint8_t* buf, int len) {
+    const __m128i vbrace = _mm_set1_epi8('}');
+    const __m128i vbracket = _mm_set1_epi8(']');
+    const __m128i vcomma = _mm_set1_epi8(',');
+    int i = 0;
+    for (; i + 16 <= len; i += 16) {
+        __m128i chunk = _mm_loadu_si128((const __m128i*)(buf + i));
+        __m128i sv = _mm_or_si128(
+            _mm_or_si128(_mm_cmpeq_epi8(chunk, vbrace), _mm_cmpeq_epi8(chunk, vbracket)),
+            _mm_cmpeq_epi8(chunk, vcomma));
+        int mask = _mm_movemask_epi8(sv);
+        if (mask) return i + __builtin_ctz(mask);
+    }
+    for (; i < len; i++) {
+        if (buf[i] == '}' || buf[i] == ']' || buf[i] == ',') return i;
+    }
+    return len;
+}
+
+/* SIMD memory comparison — 16 bytes at a time.
+ * Returns 0 if equal, 1 if different. */
+static inline int simd_memcmp(const uint8_t* s1, const uint8_t* s2, int n) {
+    int i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m128i v1 = _mm_loadu_si128((const __m128i*)(s1 + i));
+        __m128i v2 = _mm_loadu_si128((const __m128i*)(s2 + i));
+        int mask = ~_mm_movemask_epi8(_mm_cmpeq_epi8(v1, v2));
+        if (mask) return 1;
+    }
+    for (; i < n; i++) {
+        if (s1[i] != s2[i]) return 1;
+    }
+    return 0;
+}
+
 #else
-// Scalar fallback (also used on ARM/NEON platforms)
+/* Scalar fallback for ARM / non-SSE2 platforms */
+
 static inline int simd_find_char(const uint8_t* buf, int len, uint8_t c) {
     for (int i = 0; i < len; i++) {
         if (buf[i] == c) return i;
@@ -99,9 +228,23 @@ static inline int simd_skip_ws(const uint8_t* buf, int len, int start) {
     }
     return len;
 }
-#endif
 
-// Common fast parsers (all platforms)
+static inline int simd_structural_mask(const uint8_t* buf, int len) {
+    for (int i = 0; i < len; i++) {
+        if (buf[i] == '}' || buf[i] == ']' || buf[i] == ',') return i;
+    }
+    return len;
+}
+
+static inline int simd_memcmp(const uint8_t* s1, const uint8_t* s2, int n) {
+    return memcmp(s1, s2, n) != 0;
+}
+
+#endif /* __SSE2__ */
+
+/* ============================================================
+ * Common fast parsers (all platforms)
+ * ============================================================ */
 
 static inline int64_t fast_parse_int(const uint8_t* buf, int len, int* consumed) {
     int64_t val = 0;
@@ -134,9 +277,9 @@ static inline double fast_parse_f64(const uint8_t* buf, int len, int* consumed) 
     return val;
 }
 
-// Scan a JSON string value, handling escape sequences.
-// Returns the end position (after closing quote).
-// Sets *content_start and *content_len to the string content (zero-copy slice).
+/* Scan a JSON string value, handling escape sequences.
+ * Returns position after closing quote.
+ * Sets content_start/content_len for zero-copy slice. */
 static inline int scan_json_string(const uint8_t* buf, int len, int start,
                                     int* content_start, int* content_len) {
     if (start >= len || buf[start] != '"') { *content_start = start; *content_len = 0; return start; }
@@ -156,40 +299,86 @@ static inline int scan_json_string(const uint8_t* buf, int len, int start,
     return len;
 }
 
-// Skip a JSON value starting at pos. Returns position after the value.
+/* ============================================================
+ * Optimized skip_json_value — SIMD-accelerated
+ *   - Numbers: SIMD structural char scan (find },],, in 16B blocks)
+ *   - Containers: combined SIMD check for quote + open + close
+ * ============================================================ */
 static inline int skip_json_value(const uint8_t* buf, int len, int pos) {
     if (pos >= len) return len;
     uint8_t ch = buf[pos];
+
     if (ch == '"') {
         int cs = 0, cl = 0;
         return scan_json_string(buf, len, pos, &cs, &cl);
+
     } else if (ch == '{' || ch == '[') {
+        /* SIMD-accelerated container skip */
+        uint8_t open_ch = ch;
+        uint8_t close_ch = (ch == '{') ? '}' : ']';
         int depth = 1;
         int p = pos + 1;
-        while (p < len && depth > 0) {
-            uint8_t c = buf[p];
+
+#ifdef __SSE2__
+        const __m128i vquote = _mm_set1_epi8('"');
+        const __m128i vopen = _mm_set1_epi8((char)open_ch);
+        const __m128i vclose = _mm_set1_epi8((char)close_ch);
+
+        while (p + 16 <= len && depth > 0) {
+            __m128i chunk = _mm_loadu_si128((const __m128i*)(buf + p));
+            int mq = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, vquote));
+            int mo = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, vopen));
+            int mc = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, vclose));
+
+            if (!(mq | mo | mc)) {
+                p += 16;
+                continue;
+            }
+
+            /* Find earliest relevant char */
+            int earliest = p + 16;
+            if (mq) { int x = p + __builtin_ctz(mq); if (x < earliest) earliest = x; }
+            if (mo) { int x = p + __builtin_ctz(mo); if (x < earliest) earliest = x; }
+            if (mc) { int x = p + __builtin_ctz(mc); if (x < earliest) earliest = x; }
+
+            uint8_t c = buf[earliest];
             if (c == '"') {
+                int cs2 = 0, cl2 = 0;
+                p = scan_json_string(buf, len, earliest, &cs2, &cl2);
+                continue;
+            }
+            if (c == open_ch) depth++;
+            if (c == close_ch) { depth--; }
+            p = earliest + 1;
+        }
+#endif
+
+        /* Scalar fallback / tail */
+        while (p < len && depth > 0) {
+            if (buf[p] == '"') {
                 int cs2 = 0, cl2 = 0;
                 p = scan_json_string(buf, len, p, &cs2, &cl2);
                 continue;
             }
-            if (c == '{' || c == '[') depth++;
-            if (c == '}' || c == ']') depth--;
+            if (buf[p] == open_ch) depth++;
+            if (buf[p] == close_ch) { depth--; }
             p++;
         }
         return p;
+
     } else if ((ch >= '0' && ch <= '9') || ch == '-') {
-        int p = pos;
-        while (p < len) {
-            uint8_t c = buf[p];
-            if (c != '-' && c != '+' && c != '.' && c != 'e' && c != 'E' && (c < '0' || c > '9')) break;
-            p++;
-        }
+        /* SIMD structural char scan for fast number termination */
+        int remaining = len - pos;
+        int end = simd_structural_mask(buf + pos, remaining);
+        int p = pos + end;
+        /* Trim trailing whitespace before structural char */
+        while (p > pos && (buf[p-1] == ' ' || buf[p-1] == '\t' || buf[p-1] == '\r' || buf[p-1] == '\n')) p--;
         return p;
+
     } else if (ch == 't') { return (pos + 4 <= len) ? pos + 4 : len; }
     else if (ch == 'f') { return (pos + 5 <= len) ? pos + 5 : len; }
     else if (ch == 'n') { return (pos + 4 <= len) ? pos + 4 : len; }
     return pos + 1;
 }
 
-#endif
+#endif /* FASTJSON_IMPL_H */
