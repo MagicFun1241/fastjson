@@ -1,7 +1,49 @@
 module fastjson
 
+// decode_nested recursively decodes a nested struct field from a JSON substring.
+fn decode_nested[T](s string, mut val T) {
+	$if T is $struct {
+		fields := scan_object(s)
+		$for field in T.fields {
+			json_name := field.name
+			$if field.unaliased_typ is string {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					val.$(field.name) = extract_string(s, fields[idx])
+				}
+			} $else $if field.unaliased_typ is int {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					val.$(field.name) = extract_int(s, fields[idx])
+				}
+			} $else $if field.unaliased_typ is i64 {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					val.$(field.name) = extract_i64(s, fields[idx])
+				}
+			} $else $if field.unaliased_typ is f64 {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					val.$(field.name) = extract_f64(s, fields[idx])
+				}
+			} $else $if field.unaliased_typ is bool {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					val.$(field.name) = extract_bool(s, fields[idx])
+				}
+			} $else $if field.is_struct {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 && fields[idx].kind == .object_ {
+					sub := extract_substring(s, fields[idx])
+					decode_nested(sub, mut val.$(field.name))
+				}
+			}
+		}
+	}
+}
+
 // decode parses a JSON string into type T using SIMD-accelerated scanning.
-// Supports structs with fields of type: string, int, i64, f64, bool, []string, map[string]string, and nested structs.
+// Supports structs with fields of type: string, int, i64, f64, bool, []string, []int, []f64, map[string]string, and nested structs.
 pub fn decode[T](s string) !T {
 	mut result := T{}
 	$if T is $struct {
@@ -78,6 +120,16 @@ pub fn decode[T](s string) !T {
 				if idx >= 0 {
 					result.$(field.name) = extract_string_array(s, fields[idx])
 				}
+			} $else $if field.unaliased_typ is []int {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					result.$(field.name) = extract_int_array(s, fields[idx])
+				}
+			} $else $if field.unaliased_typ is []f64 {
+				idx := find_field(s, fields, json_name)
+				if idx >= 0 {
+					result.$(field.name) = extract_f64_array(s, fields[idx])
+				}
 			} $else $if field.unaliased_typ is map[string]string {
 				idx := find_field(s, fields, json_name)
 				if idx >= 0 {
@@ -87,17 +139,7 @@ pub fn decode[T](s string) !T {
 				idx := find_field(s, fields, json_name)
 				if idx >= 0 && fields[idx].kind == .object_ {
 					sub := extract_substring(s, fields[idx])
-					result.$(field.name) = decode(field.unaliased_typ, sub) or { result.$(field.name) }
-				}
-			} $else $if field.is_array {
-				// Generic array support: []int, []f64, []bool
-				idx := find_field(s, fields, json_name)
-				if idx >= 0 && fields[idx].kind == .array_ {
-					$if field.unaliaged_typ is []int {
-						result.$(field.name) = extract_int_array(s, fields[idx])
-					} $else $if field.unaliased_typ is []f64 {
-						result.$(field.name) = extract_f64_array(s, fields[idx])
-					}
+					decode_nested(sub, mut result.$(field.name))
 				}
 			}
 		}
