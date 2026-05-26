@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "fj_atof.h"
 
 /* ============================================================
  * Digits[200] lookup table — O(1) 2-digit int-to-string
@@ -271,10 +272,7 @@ static inline int64_t fast_parse_int(const uint8_t* buf, int len, int* consumed)
 }
 
 static inline double fast_parse_f64(const uint8_t* buf, int len, int* consumed) {
-    char* end;
-    double val = strtod((const char*)buf, &end);
-    *consumed = (int)((const uint8_t*)end - buf);
-    return val;
+    return fj_parse_f64(buf, len, consumed);
 }
 
 /* Scan a JSON string value, handling escape sequences.
