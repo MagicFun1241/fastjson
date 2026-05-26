@@ -25,22 +25,22 @@ Apple M1 Pro, 200,000 iterations, 3 sizes matching sonic's benchmark methodology
 | Size | Operation | V fastjson | Go stdlib | Go sonic | vs stdlib | vs sonic |
 |------|-----------|-----------|-----------|---------|-----------|----------|
 | **Small (~210B, 11 keys)** | | | | | | |
-| | Decode | **531 ns** | 2086 ns | 657 ns | 3.9× faster | 1.2× faster |
-| | Encode | 645 ns | **371 ns** | 605 ns | 0.6× | 1.1× |
-| | Roundtrip | 656 ns | 1457 ns | 1262 ns | 2.2× faster | 1.9× faster |
+| | Decode | **235 ns** | 2086 ns | 657 ns | 8.9× faster | 2.8× faster |
+| | Encode | **112 ns** | 371 ns | 605 ns | 3.3× faster | 5.4× faster |
+| | Roundtrip | 349 ns | 1457 ns | 1262 ns | 4.2× faster | 3.6× faster |
 | **Medium (~340B, 13 keys)** | | | | | | |
-| | Decode | 1306 ns | 3256 ns | **995 ns** | 2.5× faster | 1.3× |
-| | Encode | 1689 ns | **754 ns** | 1118 ns | 0.4× | 1.5× |
-| | Roundtrip | 1700 ns | 4010 ns | 2113 ns | 2.4× faster | 1.2× |
+| | Decode | **764 ns** | 3256 ns | 995 ns | 4.3× faster | 1.3× faster |
+| | Encode | **265 ns** | 754 ns | 1118 ns | 2.8× faster | 4.2× faster |
+| | Roundtrip | 1038 ns | 4010 ns | 2113 ns | 3.9× faster | 2.0× faster |
 | **Large (~420B, 9 keys + big arrays/maps)** | | | | | | |
-| | Decode | 1565 ns | 4527 ns | **1113 ns** | 2.9× faster | 1.4× |
-| | Encode | 2030 ns | **1353 ns** | 1833 ns | 0.7× | 1.1× |
-| | Roundtrip | 2103 ns | 5880 ns | 2946 ns | 2.8× faster | 1.4× |
+| | Decode | **1104 ns** | 4527 ns | 1113 ns | 4.1× faster | 1.0× |
+| | Encode | **422 ns** | 1353 ns | 1833 ns | 3.2× faster | 4.3× faster |
+| | Roundtrip | 1552 ns | 5880 ns | 2946 ns | 3.8× faster | 1.9× faster |
 
 **Takeaways:**
-- **Decode**: 2.5–3.9× faster than Go stdlib, competitive with sonic
-- **Encode**: now competitive with sonic (1.1–1.5×), closing gap to Go stdlib (Schubfach f64-to-string + C write helpers eliminate V runtime overhead)
-- **Roundtrip**: 1.9–2.8× faster than Go stdlib
+- **Decode**: 4.1–8.9× faster than Go stdlib, 1.0–2.8× faster than sonic (zero-allocation C iterator replaces V array scan)
+- **Encode**: 2.8–3.3× faster than Go stdlib, 4.2–5.4× faster than sonic (C write helpers + Schubfach f64-to-string)
+- **Roundtrip**: 3.8–4.2× faster than Go stdlib, 1.9–3.6× faster than sonic
 
 Run the benchmark yourself:
 

@@ -377,4 +377,111 @@ static inline int fj_write_string_map(uint8_t* buf, int p,
     return p;
 }
 
+/* ============================================================
+ * Zero-allocation scan iterator
+ *   - fj_scan_pair: stack struct for key/value pair info
+ *   - fj_scan_open: skip ws, validate '{', return pos after it
+ *   - fj_scan_next: find next key/value pair, fill pair, return new pos
+ * ============================================================ */
+
+typedef struct fj_scan_pair {
+    int key_start;
+    int key_len;
+    int val_start;
+    int val_len;
+    int kind;  /* 0=null, 1=bool, 2=int, 3=float, 4=string, 5=array, 6=object */
+} fj_scan_pair;
+
+/* Skip whitespace and validate opening '{'.
+ * Returns position after '{', or -1 on error. */
+static inline int fj_scan_open(const uint8_t* buf, int len) {
+    int pos = simd_skip_ws(buf, len, 0);
+    if (pos >= len || buf[pos] != '{') return -1;
+    return pos + 1;
+}
+
+/* Find next key/value pair in a JSON object.
+ * *pair is filled with key position/length, value position/length, and kind.
+ * Returns new position (after value), or -1 if '}' or end reached. */
+static inline int fj_scan_next(const uint8_t* buf, int len, int pos, fj_scan_pair* pair) {
+    pos = simd_skip_ws(buf, len, pos);
+    if (pos >= len || buf[pos] == '}') return -1;
+    if (buf[pos] == ',') {
+        pos++;
+        pos = simd_skip_ws(buf, len, pos);
+        if (pos >= len || buf[pos] == '}') return -1;
+    }
+
+    /* Parse key */
+    if (buf[pos] != '"') { pos++; return pos; }
+    int cs = 0, cl = 0;
+    pos = scan_json_string(buf, len, pos, &cs, &cl);
+    pair->key_start = cs;
+    pair->key_len = cl;
+
+    /* Skip to colon */
+    int colon = simd_find_char(buf + pos, len - pos, ':');
+    if (colon < 0) return -1;
+    pos += colon + 1;
+    pos = simd_skip_ws(buf, len, pos);
+    if (pos >= len) return -1;
+
+    /* Determine value kind and position */
+    int val_start = pos;
+    uint8_t ch = buf[pos];
+    switch (ch) {
+        case '"': {
+            pair->kind = 4; /* string */
+            int vs = 0, vl = 0;
+            pos = scan_json_string(buf, len, pos, &vs, &vl);
+            break;
+        }
+        case '{': {
+            pair->kind = 6; /* object */
+            pos = skip_json_value(buf, len, pos);
+            break;
+        }
+        case '[': {
+            pair->kind = 5; /* array */
+            pos = skip_json_value(buf, len, pos);
+            break;
+        }
+        case 't': case 'f': {
+            pair->kind = 1; /* bool */
+            pos = skip_json_value(buf, len, pos);
+            break;
+        }
+        case 'n': {
+            pair->kind = 0; /* null */
+            pos = skip_json_value(buf, len, pos);
+            break;
+        }
+        default: {
+            /* Number: single structural scan to find end, then check for '.' within range */
+            if ((ch >= '0' && ch <= '9') || ch == '-') {
+                int remaining = len - pos;
+                int end_off = simd_structural_mask(buf + pos, remaining);
+                /* Check if '.' appears before the structural char */
+                int is_float = 0;
+                /* Scan only up to the structural char for '.' */
+                int scan_end = (end_off < remaining) ? end_off : remaining;
+                for (int i = 0; i < scan_end; i++) {
+                    if (buf[pos + i] == '.') { is_float = 1; break; }
+                }
+                pair->kind = is_float ? 3 : 2; /* float or int */
+                pos += end_off;
+                /* Trim trailing whitespace before structural char */
+                while (pos > val_start && (buf[pos-1] == ' ' || buf[pos-1] == '\t' || buf[pos-1] == '\r' || buf[pos-1] == '\n')) pos--;
+            } else {
+                pair->kind = 0; /* unknown -> null */
+                pos++;
+            }
+            break;
+        }
+    }
+    pair->val_start = val_start;
+    pair->val_len = pos - val_start;
+    return pos;
+}
+
 #endif /* FASTJSON_IMPL_H */

@@ -166,11 +166,15 @@ fn bench_decode[T](label string, n int, pool []string) time.Duration {
 }
 
 fn bench_encode[T](label string, n int, pool []string) time.Duration {
+	// Pre-decode all values so we only measure encode
+	mut decoded := []T{}
+	for i := 0; i < pool.len; i++ {
+		decoded << fastjson.decode[T](pool[i]) or { panic(err) }
+	}
 	mut sw := time.new_stopwatch()
 	sw.start()
 	for i := 0; i < n; i++ {
-		input := fastjson.decode[T](pool[i % pool_size]) or { panic(err) }
-		g_sink_str = fastjson.encode(input)
+		g_sink_str = fastjson.encode(decoded[i % pool.len])
 	}
 	sw.stop()
 	return sw.elapsed()
