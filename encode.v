@@ -1,11 +1,14 @@
 module fastjson
 
+import strings
+
 // f64_to_str converts a float64 to its shortest decimal representation using Schubfach algorithm.
 // Writes "null" for inf/nan.
 pub fn f64_to_str(val f64) string {
-	buf := unsafe { C.malloc(64) }
-	n := C.fast_f64_to_buf(buf, 0, val)
-	return unsafe { tos(buf, n) }
+	mut sb := strings.new_builder(32)
+	n := unsafe { C.fast_f64_to_buf(sb.data, 0, val) }
+	unsafe { sb.len = n }
+	return sb.str()
 }
 
 // encode serializes a value of type T to a JSON string using direct buffer building.
@@ -43,35 +46,39 @@ pub fn encode[T](val T) string {
 
 // Direct int-to-string via C, avoiding V's .str() allocation overhead.
 fn int_to_str(val i64) string {
-	buf := unsafe { C.malloc(21) }
-	n := unsafe { C.fast_int_to_buf(buf, 0, val) }
-	return unsafe { tos(buf, n) }
+	mut sb := strings.new_builder(24)
+	n := unsafe { C.fast_int_to_buf(sb.data, 0, val) }
+	unsafe { sb.len = n }
+	return sb.str()
 }
 
 fn uint64_to_str(val u64) string {
-	buf := unsafe { C.malloc(21) }
-	n := unsafe { C.fast_uint64_to_buf(buf, 0, val) }
-	return unsafe { tos(buf, n) }
+	mut sb := strings.new_builder(24)
+	n := unsafe { C.fast_uint64_to_buf(sb.data, 0, val) }
+	unsafe { sb.len = n }
+	return sb.str()
 }
 
 fn encode_string_value(s string) string {
-	mut buf := unsafe { &u8(C.malloc(s.len + 2)) }
+	mut sb := strings.new_builder(s.len + 2)
+	buf := unsafe { &u8(sb.data) }
+	total := s.len + 2
 	unsafe {
-		buf[0] = `"`
+		buf[0] = u8(`"`)
 		C.memcpy(buf + 1, s.str, s.len)
-		buf[s.len + 1] = `"`
+		buf[s.len + 1] = u8(`"`)
 	}
-	return unsafe { tos(buf, s.len + 2) }
+	unsafe { sb.len = total }
+	return sb.str()
 }
 
 fn encode_struct[T](val T) string {
-	// Size pass — uses C helpers to minimize V boundary checks
+	// Size pass — compute exact buffer size
 	mut size := 2 // {}
 	$for field in T.fields {
 		size += 4 + field.name.len // ,"key":
 		$if field.unaliased_typ is string {
-			v := val.$(field.name)
-			size += v.len + 2
+			size += val.$(field.name).len + 2
 		} $else $if field.unaliased_typ is bool {
 			size += 5
 		} $else $if field.unaliased_typ is int {
@@ -97,27 +104,28 @@ fn encode_struct[T](val T) string {
 		} $else $if field.unaliased_typ is f32 {
 			size += 16
 		} $else $if field.unaliased_typ is []string {
-			arr := val.$(field.name)
 			size += 3
-			for item in arr {
+			for item in val.$(field.name) {
 				size += item.len + 3
 			}
 		} $else $if field.unaliased_typ is map[string]string {
-			m := val.$(field.name)
 			size += 2
-			for k, v in m {
+			for k, v in val.$(field.name) {
 				size += k.len + v.len + 6
 			}
 		} $else $if field.is_struct {
-			size += 128
+			sub := encode(val.$(field.name))
+			size += sub.len
 		} $else {
 			size += 4
 		}
 	}
 
-	buf := unsafe { &u8(C.malloc(size)) }
+	mut sb := strings.new_builder(size)
+	// Write directly into builder's buffer using C helpers
+	buf := unsafe { &u8(sb.data) }
 	mut p := 0
-	unsafe { buf[p] = `{` }
+	unsafe { buf[p] = u8(`{`) }
 	p++
 
 	mut first := 1
@@ -126,7 +134,8 @@ fn encode_struct[T](val T) string {
 		p = unsafe { C.fj_write_obj_key(buf, p, first, field.name.str, field.name.len) }
 		first = 0
 
-		// Write value — use C helpers where possible to avoid buf[p] checks
+		// Write value — local vars for primitives (safe under autofree, value types).
+		// Arrays/maps use direct field access to avoid V autofree ComptimeSelector bug.
 		$if field.unaliased_typ is string {
 			v := val.$(field.name)
 			p = unsafe { C.fj_write_string(buf, p, v.str, v.len) }
@@ -134,71 +143,60 @@ fn encode_struct[T](val T) string {
 			v := val.$(field.name)
 			p = unsafe { C.fj_write_bool(buf, p, int(v)) }
 		} $else $if field.unaliased_typ is int {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is i64 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, v) }
+			p += unsafe { C.fast_int_to_buf(buf, p, val.$(field.name)) }
 		} $else $if field.unaliased_typ is i32 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is i16 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is i8 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is u64 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_uint64_to_buf(buf, p, v) }
+			p += unsafe { C.fast_uint64_to_buf(buf, p, val.$(field.name)) }
 		} $else $if field.unaliased_typ is u32 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is u16 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is u8 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_int_to_buf(buf, p, i64(v)) }
+			p += unsafe { C.fast_int_to_buf(buf, p, i64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is f64 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_f64_to_buf(buf, p, v) }
+			p += unsafe { C.fast_f64_to_buf(buf, p, val.$(field.name)) }
 		} $else $if field.unaliased_typ is f32 {
-			v := val.$(field.name)
-			p += unsafe { C.fast_f64_to_buf(buf, p, f64(v)) }
+			p += unsafe { C.fast_f64_to_buf(buf, p, f64(val.$(field.name))) }
 		} $else $if field.unaliased_typ is []string {
-			arr := val.$(field.name)
-			unsafe { buf[p] = `[` }
+			unsafe { buf[p] = u8(`[`) }
 			p++
-			for i, item in arr {
-				if i > 0 {
-					unsafe { buf[p] = `,` }
+			mut arr_first := true
+			for item in val.$(field.name) {
+				if !arr_first {
+					unsafe { buf[p] = u8(`,`) }
 					p++
 				}
+				arr_first = false
 				unsafe {
-					buf[p] = `"`
+					buf[p] = u8(`"`)
 					p++
 					C.memcpy(buf + p, item.str, item.len)
 					p += item.len
-					buf[p] = `"`
+					buf[p] = u8(`"`)
 					p++
 				}
 			}
-			unsafe { buf[p] = `]` }
+			unsafe { buf[p] = u8(`]`) }
 			p++
 		} $else $if field.unaliased_typ is map[string]string {
-			m := val.$(field.name)
-			unsafe { buf[p] = `{` }
+			unsafe { buf[p] = u8(`{`) }
 			p++
 			mut mfirst := true
-			for k, v in m {
+			for k, v in val.$(field.name) {
 				if !mfirst {
-					unsafe { buf[p] = `,` }
+					unsafe { buf[p] = u8(`,`) }
 					p++
 				}
 				mfirst = false
 				unsafe {
-					buf[p] = `"`
+					buf[p] = u8(`"`)
 					p++
 					C.memcpy(buf + p, k.str, k.len)
 					p += k.len
@@ -206,11 +204,11 @@ fn encode_struct[T](val T) string {
 					p += 3
 					C.memcpy(buf + p, v.str, v.len)
 					p += v.len
-					buf[p] = `"`
+					buf[p] = u8(`"`)
 					p++
 				}
 			}
-			unsafe { buf[p] = `}` }
+			unsafe { buf[p] = u8(`}`) }
 			p++
 		} $else $if field.is_struct {
 			sub := encode(val.$(field.name))
@@ -221,7 +219,8 @@ fn encode_struct[T](val T) string {
 		}
 	}
 
-	unsafe { buf[p] = `}` }
+	unsafe { buf[p] = u8(`}`) }
 	p++
-	return unsafe { tos(buf, p) }
+	unsafe { sb.len = p }
+	return sb.str()
 }

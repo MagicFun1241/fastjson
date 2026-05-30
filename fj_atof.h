@@ -122,16 +122,14 @@ static inline double fj_parse_f64(const uint8_t* buf, int len, int* consumed) {
         return val;
     }
 
-    /* Fallback: strtod */
+    /* Fallback: strtod — copy into null-terminated tmp buffer */
     char tmp[64];
     int n = (len < 63) ? len : 63;
-    memcpy(tmp, buf - (sgn < 0 ? 0 : 0), n);
+    memcpy(tmp, buf, n);
     tmp[n] = '\0';
-    /* Re-parse from original buffer for strtod (needs null-terminated) */
-    /* We already consumed the number, just use strtod on the original */
     char* end;
-    val = strtod((const char*)buf, &end);
-    *consumed = (int)((const uint8_t*)end - buf);
+    val = strtod(tmp, &end);
+    *consumed = (int)(end - tmp);
     return val;
 }
 

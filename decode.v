@@ -29,7 +29,9 @@ fn decode_nested[T](s string, mut val T) {
 						val.$(field.name) = extract_bool_from(buf, pair.val_start, pair.kind)
 					} $else $if field.is_struct {
 						if pair.kind == 6 {
-							sub := unsafe { tos(buf + pair.val_start, pair.val_len) }
+							// Clone: substring must own its data for autofree safety.
+								// Zero-copy tos() slice would be freed by autofree, corrupting memory.
+								sub := unsafe { tos(buf + pair.val_start, pair.val_len) }.clone()
 							decode_nested(sub, mut val.$(field.name))
 						}
 					}
@@ -49,7 +51,7 @@ pub fn decode[T](s string) !T {
 		mut pair := ScanPair{}
 		mut pos := unsafe { C.fj_scan_open(buf, len_) }
 		if pos < 0 {
-			return result
+			return error('fastjson: invalid JSON: expected opening brace')
 		}
 		for {
 			pos = unsafe { C.fj_scan_next(buf, len_, pos, &pair) }
@@ -94,7 +96,9 @@ pub fn decode[T](s string) !T {
 						result.$(field.name) = extract_map_from(s, pair.val_start, pair.val_len, pair.kind)
 					} $else $if field.is_struct {
 						if pair.kind == 6 {
-							sub := unsafe { tos(buf + pair.val_start, pair.val_len) }
+							// Clone: substring must own its data for autofree safety.
+								// Zero-copy tos() slice would be freed by autofree, corrupting memory.
+								sub := unsafe { tos(buf + pair.val_start, pair.val_len) }.clone()
 							decode_nested(sub, mut result.$(field.name))
 						}
 					}
@@ -178,7 +182,9 @@ fn extract_string_array_from(json string, val_start int, val_len int, kind int) 
 			mut cs := 0
 			mut cl := 0
 			pos = unsafe { C.scan_json_string(buf, len_, pos, &cs, &cl) }
-			result << unsafe { tos(buf + cs, cl) }
+			// Clone: array elements must own their data for autofree safety.
+			// Zero-copy tos() slices would be freed by autofree, corrupting the array.
+			result << unsafe { tos(buf + cs, cl) }.clone()
 		} else {
 			pos = unsafe { C.skip_json_value(buf, len_, pos) }
 		}
@@ -278,7 +284,8 @@ fn extract_map_from(json string, val_start int, val_len int, kind int) map[strin
 		mut ks := 0
 		mut kl := 0
 		pos = unsafe { C.scan_json_string(buf, len_, pos, &ks, &kl) }
-		key := unsafe { tos(buf + ks, kl) }
+		// Clone key: map keys must own their data for autofree safety.
+		key := unsafe { tos(buf + ks, kl) }.clone()
 
 		colon := unsafe { C.simd_find_char(buf + pos, end - pos, u8(`:`)) }
 		if colon < 0 {
@@ -291,7 +298,8 @@ fn extract_map_from(json string, val_start int, val_len int, kind int) map[strin
 			mut vs := 0
 			mut vl := 0
 			pos = unsafe { C.scan_json_string(buf, len_, pos, &vs, &vl) }
-			result[key] = unsafe { tos(buf + vs, vl) }
+			// Clone value: map values must own their data for autofree safety.
+			result[key] = unsafe { tos(buf + vs, vl) }.clone()
 		} else {
 			pos = unsafe { C.skip_json_value(buf, len_, pos) }
 		}
